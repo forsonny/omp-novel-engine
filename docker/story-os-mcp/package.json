@@ -1,6 +1,6 @@
 {
   "name": "story-os-mcp",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "private": true,
   "description": "Story OS MCP server for the OMP Novel Engine workspace.",
   "type": "module",

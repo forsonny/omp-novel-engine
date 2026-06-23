@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.9 - 2026-06-23
+
+- Changed OMP command acknowledgements to local UI notifications so slash commands do not replay corrupted session history through provider turns.
+- Added runtime smoke coverage that fails if command acknowledgements use synthetic model-message dispatch.
+
 ## 0.5.8 - 2026-06-23
 
 - Fixed OMP command selection prompts to pass string options for `/novel:new`, serial arc planning, and serial recap generation.

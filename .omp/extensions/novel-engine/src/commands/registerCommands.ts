@@ -40,6 +40,11 @@ type Choice<T extends string> = {
   label: string;
   value: T;
 };
+type CommandMessageContext = {
+  ui: {
+    notify: (message: string, type?: "info" | "warning" | "error") => void;
+  };
+};
 
 type SerialCommandContext = {
   slug: string;
@@ -63,10 +68,10 @@ const asChoiceText = (value: unknown): string => {
   return asString(record.value) || asString(record.label);
 };
 const sendCommandMessage = (
-  pi: Pick<ExtensionAPI, "sendUserMessage">,
+  ctx: CommandMessageContext,
   content: string
 ) => {
-  pi.sendUserMessage(content);
+  ctx.ui.notify(content, "info");
 };
 const isStoryCallOk = (value: unknown): boolean => {
   const root = asObject(value);
@@ -606,7 +611,7 @@ export function registerCommands(pi: ExtensionAPI) {
       }
 
       await sendCommandMessage(
-        pi,
+        ctx,
         `Created ${asString(project.slug) ? `project "${asString(project.slug)}"` : "new project"} with premise gate ${asString(gate.id) || "pending"}. Please review premise options and approve in the UI.`,
       );
     }
@@ -623,12 +628,13 @@ export function registerCommands(pi: ExtensionAPI) {
 
   const resolveSerialCommandContext = async (ctx: {
     cwd?: string;
+    ui: CommandMessageContext["ui"];
   }): Promise<SerialCommandContext | null> => {
     const cwd = ctx.cwd ?? process.cwd();
     const projectContext = await resolveCurrentSerialProject(cwd);
     if (!projectContext) {
       await sendCommandMessage(
-        pi,
+        ctx,
         "No active Story OS project found. Run /novel:new first.",
       );
       return null;
@@ -636,7 +642,7 @@ export function registerCommands(pi: ExtensionAPI) {
 
     if (projectContext.mode !== "serial") {
       await sendCommandMessage(
-        pi,
+        ctx,
         `Serial commands require an active serial project. Current project mode is ${projectContext.mode || "unknown"}.`,
       );
       return null;
@@ -650,10 +656,11 @@ export function registerCommands(pi: ExtensionAPI) {
     route: string,
     projectContext: SerialCommandContext,
     request: JsonMap,
-    cwd: string
+    cwd: string,
+    ctx: CommandMessageContext
   ) => {
     const result = await postSerialCommand(pi, commandName, route, projectContext, request, cwd);
-    await sendCommandMessage(pi, [result.message, ...result.guidance].join("\n"));
+    await sendCommandMessage(ctx, [result.message, ...result.guidance].join("\n"));
   };
 
   pi.registerCommand("serial:plan-season", {
@@ -667,7 +674,7 @@ export function registerCommands(pi: ExtensionAPI) {
       const titleFromArg = asString(argsRecord.title || argsRecord.seasonTitle || argsRecord.name);
       const title = titleFromArg || await ctx.ui.input("Season title", "");
       if (!title) {
-        await sendCommandMessage(pi, "Season planning requires a season title.");
+        await sendCommandMessage(ctx, "Season planning requires a season title.");
         return;
       }
 
@@ -684,7 +691,7 @@ export function registerCommands(pi: ExtensionAPI) {
       const premise = asString(argsRecord.premise || argsRecord.notes);
       if (premise) request.premise = premise;
 
-      await runSerialCommand("serial:plan-season", "/api/serial/season/plan", projectContext, request, cwd);
+      await runSerialCommand("serial:plan-season", "/api/serial/season/plan", projectContext, request, cwd, ctx);
     }
   });
 
@@ -701,14 +708,14 @@ export function registerCommands(pi: ExtensionAPI) {
         ? (scopeArg as SerialArcScope)
         : await selectChoice(ctx, "Arc scope", serialArcScopes.map((scope) => ({ label: scope, value: scope })));
       if (!scopeType) {
-        await sendCommandMessage(pi, "Arc planning requires a scope type.");
+        await sendCommandMessage(ctx, "Arc planning requires a scope type.");
         return;
       }
 
       const titleFromArg = asString(argsRecord.title || argsRecord.arcTitle || argsRecord.name);
       const title = titleFromArg || await ctx.ui.input("Arc title", "");
       if (!title) {
-        await sendCommandMessage(pi, "Arc planning requires a title.");
+        await sendCommandMessage(ctx, "Arc planning requires a title.");
         return;
       }
 
@@ -725,7 +732,7 @@ export function registerCommands(pi: ExtensionAPI) {
       const synopsis = asString(argsRecord.arcSynopsis || argsRecord.synopsis);
       if (synopsis) request.arcSynopsis = synopsis;
 
-      await runSerialCommand("serial:plan-arc", "/api/serial/arc/plan", projectContext, request, cwd);
+      await runSerialCommand("serial:plan-arc", "/api/serial/arc/plan", projectContext, request, cwd, ctx);
     }
   });
 
@@ -753,7 +760,7 @@ export function registerCommands(pi: ExtensionAPI) {
       const releaseLabel = asString(argsRecord.releaseLabel || argsRecord.label);
       if (releaseLabel) request.releaseLabel = releaseLabel;
 
-      await runSerialCommand("serial:next-episode", "/api/serial/next-episode", projectContext, request, cwd);
+      await runSerialCommand("serial:next-episode", "/api/serial/next-episode", projectContext, request, cwd, ctx);
     }
   });
 
@@ -770,7 +777,7 @@ export function registerCommands(pi: ExtensionAPI) {
         ? (audienceArg as SerialRecapAudience)
         : await selectChoice(ctx, "Recap audience", serialRecapAudiences.map((entry) => ({ label: entry, value: entry })));
       if (!audience) {
-        await sendCommandMessage(pi, "Recap generation requires an audience.");
+        await sendCommandMessage(ctx, "Recap generation requires an audience.");
         return;
       }
 
@@ -788,21 +795,21 @@ export function registerCommands(pi: ExtensionAPI) {
       const includeOpenPromises = argsRecord.includeOpenPromises === true || asString(argsRecord.includeOpenPromises).toLowerCase() === "true";
       if (includeOpenPromises) request.includeOpenPromises = true;
 
-      await runSerialCommand("serial:recap", "/api/serial/recap", projectContext, request, cwd);
+      await runSerialCommand("serial:recap", "/api/serial/recap", projectContext, request, cwd, ctx);
     }
   });
 
   const handleChapterCommand = async (
     mode: "draft" | "revise",
     args: unknown,
-    ctx: { cwd?: string; ui: { input: (label: string, initialValue?: string) => Promise<string> } }
+    ctx: { cwd?: string; ui: { input: (label: string, initialValue?: string) => Promise<string>; notify: CommandMessageContext["ui"]["notify"] } }
   ) => {
     const cwd = ctx.cwd ?? process.cwd();
     const projectStatus = await storyOsPost("/api/project/status", {}, { cwd });
     if (!isStoryCallOk(projectStatus)) {
       const statusError = asString(unwrapStoryData(projectStatus).error) || asString(unwrapStoryData(projectStatus).code);
       await sendCommandMessage(
-        pi,
+        ctx,
         `Unable to reach or query Story OS MCP: ${statusError || "unknown"}`,
       );
       return;
@@ -811,7 +818,7 @@ export function registerCommands(pi: ExtensionAPI) {
     const projectSlug = resolveProjectSlug(projectStatus);
     if (!projectSlug) {
       await sendCommandMessage(
-        pi,
+        ctx,
         "No active Story OS project found. Run /novel:new first.",
       );
       return;
@@ -847,10 +854,10 @@ export function registerCommands(pi: ExtensionAPI) {
         }
       }
 
-      await sendCommandMessage(pi, lines.join("\n"));
+      await sendCommandMessage(ctx, lines.join("\n"));
     } catch (error) {
       await sendCommandMessage(
-        pi,
+        ctx,
         `Chapter workflow could not continue: ${error instanceof Error ? error.message : "unknown error"}`,
       );
     }
@@ -873,8 +880,8 @@ export function registerCommands(pi: ExtensionAPI) {
   for (const [name, instruction] of Object.entries(commandToWorkflow)) {
     pi.registerCommand(name, {
       description: instruction,
-      handler: async (_args, _ctx) => {
-        await sendCommandMessage(pi, instruction);
+      handler: async (_args, ctx) => {
+        await sendCommandMessage(ctx, instruction);
       }
     });
   }

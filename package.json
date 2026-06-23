@@ -1,6 +1,6 @@
 {
   "name": "omp-novel-engine",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "private": true,
   "description": "OMP extension workspace for planning, drafting, auditing, and exporting novels, series, and serials.",
   "type": "module",

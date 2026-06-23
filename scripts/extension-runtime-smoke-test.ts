@@ -16,7 +16,7 @@ type MockContext = {
   ui: {
     input: (label: string, initialValue?: string) => Promise<string>;
     select?: (label: string, options: string[]) => Promise<string>;
-    notify: (message: string, level: string) => void;
+    notify: (message: string, level?: string) => void;
   };
 };
 
@@ -36,8 +36,6 @@ type MockHook = {
 };
 
 type JsonMap = Record<string, unknown>;
-type MockUserContent = string | Array<{ type: string; text?: string }>;
-type MockSendOptions = { deliverAs?: unknown };
 
 const checks: Array<{ label: string; ok: boolean; details?: string }> = [];
 const addCheck = (label: string, ok: boolean, details = "") => checks.push({ label, ok, details });
@@ -70,8 +68,7 @@ const commands: Array<{ name: string; command: MockCommand }> = [];
 const tools: MockTool[] = [];
 const hooks: MockHook[] = [];
 const labels: string[] = [];
-const messages: string[] = [];
-const userMessages: MockUserContent[] = [];
+const notifications: Array<{ message: string; level?: string }> = [];
 const entries: unknown[] = [];
 
 const pi = {
@@ -87,18 +84,12 @@ const pi = {
       JSON.stringify({ message, options }),
     );
   },
-  sendUserMessage: async (content: MockUserContent, options?: MockSendOptions) => {
-    userMessages.push(content);
-    const text = typeof content === "string"
-      ? content
-      : content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
-    addCheck("sendUserMessage receives non-empty text", text.trim().length > 0, JSON.stringify(content));
-    addCheck("sendUserMessage starts immediate agent turn", options === undefined, JSON.stringify(options));
-    if (text) {
-      messages.push(text);
-    } else {
-      messages.push(JSON.stringify(content ?? ""));
-    }
+  sendUserMessage: async (content: unknown, options?: unknown) => {
+    addCheck(
+      "command continuations avoid sendUserMessage",
+      false,
+      JSON.stringify({ content, options }),
+    );
   },
   appendEntry: async (...args: unknown[]) => {
     entries.push(args);
@@ -155,6 +146,9 @@ let variantListCalls = 0;
 const routeCalls: string[] = [];
 const selectCalls: Array<{ label: string; options: string[] }> = [];
 const originalFetch = globalThis.fetch;
+const notify = (message: string, level?: string) => {
+  notifications.push({ message, level });
+};
 
 const smokeSelect = async (label: string, options: string[]) => {
   selectCalls.push({ label, options });
@@ -342,13 +336,14 @@ try {
           return initialValue ?? "";
         },
         select: smokeSelect,
-        notify: () => undefined,
+        notify,
       },
     });
 
-    const joinedMessages = messages.join("\n---\n");
+    const joinedNotifications = notifications.map((entry) => entry.message).join("\n---\n");
     addCheck("new command calls project create", routeCalls.includes("/api/project/create"), routeCalls.join(", "));
-    addCheck("new command reports created project", joinedMessages.includes("Created project"), joinedMessages);
+    addCheck("new command reports created project locally", joinedNotifications.includes("Created project"), joinedNotifications);
+    addCheck("new command notification is informational", notifications.some((entry) => entry.message.includes("Created project") && entry.level === "info"), JSON.stringify(notifications));
     addCheck("new command maps selected project mode", selectCalls.some((entry) => entry.label === "Project mode"), JSON.stringify(selectCalls));
   }
 
@@ -365,17 +360,17 @@ try {
           if (label === "Chapter number") return "1";
           return initialValue ?? "";
         },
-        notify: () => undefined,
+        notify,
       },
     });
 
-    const joinedMessages = messages.join("\n---\n");
+    const joinedNotifications = notifications.map((entry) => entry.message).join("\n---\n");
     addCheck("draft command queried project status", routeCalls.includes("/api/project/status"), routeCalls.join(", "));
     addCheck("draft command recovered missing chapter", routeCalls.includes("/api/chapter/outline"), routeCalls.join(", "));
     addCheck("draft command rechecked variants", variantListCalls === 2, String(variantListCalls));
-    addCheck("draft command sent workflow guidance", joinedMessages.includes("Draft workflow for chapter chapter-one"), joinedMessages);
-    addCheck("draft command reports new outline", joinedMessages.includes("Started new chapter outline."), joinedMessages);
-    addCheck("draft command avoids error path", !joinedMessages.includes("could not continue"), joinedMessages);
+    addCheck("draft command reports workflow guidance locally", joinedNotifications.includes("Draft workflow for chapter chapter-one"), joinedNotifications);
+    addCheck("draft command reports new outline", joinedNotifications.includes("Started new chapter outline."), joinedNotifications);
+    addCheck("draft command avoids error path", !joinedNotifications.includes("could not continue"), joinedNotifications);
   }
 } finally {
   globalThis.fetch = originalFetch;
