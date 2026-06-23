@@ -15,6 +15,7 @@ type MockContext = {
   hasUI?: boolean;
   ui: {
     input: (label: string, initialValue?: string) => Promise<string>;
+    select?: (label: string, options: string[]) => Promise<string>;
     notify: (message: string, level: string) => void;
   };
 };
@@ -35,6 +36,8 @@ type MockHook = {
 };
 
 type JsonMap = Record<string, unknown>;
+type MockUserContent = string | Array<{ type: string; text?: string }>;
+type MockSendOptions = { deliverAs?: unknown };
 
 const checks: Array<{ label: string; ok: boolean; details?: string }> = [];
 const addCheck = (label: string, ok: boolean, details = "") => checks.push({ label, ok, details });
@@ -68,6 +71,7 @@ const tools: MockTool[] = [];
 const hooks: MockHook[] = [];
 const labels: string[] = [];
 const messages: string[] = [];
+const userMessages: MockUserContent[] = [];
 const entries: unknown[] = [];
 
 const pi = {
@@ -76,8 +80,25 @@ const pi = {
   on: (name: string, handler: MockHook["handler"]) => hooks.push({ name, handler }),
   registerTool: (tool: MockTool) => tools.push(tool),
   registerCommand: (name: string, command: MockCommand) => commands.push({ name, command }),
-  sendMessage: async (message: string) => {
-    messages.push(message);
+  sendMessage: async (message: unknown, options?: unknown) => {
+    addCheck(
+      "command continuations avoid custom sendMessage",
+      false,
+      JSON.stringify({ message, options }),
+    );
+  },
+  sendUserMessage: async (content: MockUserContent, options?: MockSendOptions) => {
+    userMessages.push(content);
+    const text = typeof content === "string"
+      ? content
+      : content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+    addCheck("sendUserMessage receives non-empty text", text.trim().length > 0, JSON.stringify(content));
+    addCheck("sendUserMessage starts immediate agent turn", options === undefined, JSON.stringify(options));
+    if (text) {
+      messages.push(text);
+    } else {
+      messages.push(JSON.stringify(content ?? ""));
+    }
   },
   appendEntry: async (...args: unknown[]) => {
     entries.push(args);
@@ -132,11 +153,34 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
 
 let variantListCalls = 0;
 const routeCalls: string[] = [];
+const selectCalls: Array<{ label: string; options: string[] }> = [];
 const originalFetch = globalThis.fetch;
+
+const smokeSelect = async (label: string, options: string[]) => {
+  selectCalls.push({ label, options });
+  addCheck(
+    `${label} select receives string options`,
+    Array.isArray(options) && options.every((option) => typeof option === "string"),
+    JSON.stringify(options),
+  );
+  if (label === "Project mode") return "Indefinite web serial";
+  if (label === "Arc scope") return "season";
+  if (label === "Recap audience") return "reader";
+  return options[0] ?? "";
+};
 
 globalThis.fetch = async (input: RequestInfo | URL) => {
   const url = new URL(String(input));
   routeCalls.push(url.pathname);
+
+  if (url.pathname === "/api/project/create") {
+    return jsonResponse(mcpOk({
+      project: { slug: "runtime-smoke-new", mode: "serial" },
+      gate: { id: "premise-gate", gate_type: "premise", status: "pending" },
+      dbPath: "stories/runtime-smoke-new/canon/canon.db",
+      graphDir: "stories/runtime-smoke-new/canon/graph",
+    }));
+  }
 
   if (url.pathname === "/api/project/status") {
     return jsonResponse(mcpOk({
@@ -284,6 +328,29 @@ try {
     providerMessages.some((entry) => JSON.stringify(entry).includes("Story OS hard constraints")),
     JSON.stringify(providerResult),
   );
+
+  const newCommand = commands.find((entry) => entry.name === "novel:new")?.command;
+  if (!newCommand) {
+    addCheck("new command available for invocation", false);
+  } else {
+    await newCommand.handler({}, {
+      cwd: process.cwd(),
+      hasUI: true,
+      ui: {
+        input: async (label: string, initialValue?: string) => {
+          if (label === "Project title") return "Runtime Smoke Serial";
+          return initialValue ?? "";
+        },
+        select: smokeSelect,
+        notify: () => undefined,
+      },
+    });
+
+    const joinedMessages = messages.join("\n---\n");
+    addCheck("new command calls project create", routeCalls.includes("/api/project/create"), routeCalls.join(", "));
+    addCheck("new command reports created project", joinedMessages.includes("Created project"), joinedMessages);
+    addCheck("new command maps selected project mode", selectCalls.some((entry) => entry.label === "Project mode"), JSON.stringify(selectCalls));
+  }
 
   const draftCommand = commands.find((entry) => entry.name === "novel:draft-chapter")?.command;
   if (!draftCommand) {

@@ -36,6 +36,10 @@ type ChapterWorkflowSummary = {
   blockers: string[];
   errors: string[];
 };
+type Choice<T extends string> = {
+  label: string;
+  value: T;
+};
 
 type SerialCommandContext = {
   slug: string;
@@ -52,6 +56,18 @@ const asObject = (value: unknown): JsonMap => (
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const asNumber = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : Number.NaN);
+const asChoiceText = (value: unknown): string => {
+  const direct = asString(value);
+  if (direct) return direct;
+  const record = asObject(value);
+  return asString(record.value) || asString(record.label);
+};
+const sendCommandMessage = (
+  pi: Pick<ExtensionAPI, "sendUserMessage">,
+  content: string
+) => {
+  pi.sendUserMessage(content);
+};
 const isStoryCallOk = (value: unknown): boolean => {
   const root = asObject(value);
   if (root.ok !== true) return false;
@@ -115,6 +131,27 @@ const resolveProjectSlug = (projectStatus: unknown): string => {
 
   const project = asObject(firstProject.project);
   return asString(project.slug) || asString(firstProject.slug);
+};
+
+const selectChoice = async <T extends string>(
+  ctx: {
+    ui: {
+      select?: (label: string, options: string[]) => Promise<unknown>;
+      input: (label: string, initialValue?: string) => Promise<string>;
+    };
+  },
+  label: string,
+  choices: Array<Choice<T>>
+): Promise<T | ""> => {
+  const labels = choices.map((choice) => choice.label);
+  const selection = typeof ctx.ui.select === "function"
+    ? await ctx.ui.select(label, labels)
+    : await ctx.ui.input(`${label} (${labels.join(", ")})`, labels[0]);
+  const selectionText = asChoiceText(selection);
+  const selectionIndex = asNumber(selection);
+  const fromIndex = Number.isInteger(selectionIndex) ? choices[selectionIndex] : undefined;
+  const matched = choices.find((choice) => choice.label === selectionText || choice.value === selectionText) ?? fromIndex;
+  return matched?.value ?? "";
 };
 
 const findPendingChapterGates = (projectStatus: unknown): PendingGateSummary[] => (
@@ -535,11 +572,11 @@ export function registerCommands(pi: ExtensionAPI) {
     description: "Create a new novel, finite series, or indefinite serial project through a human approval gate.",
     handler: async (_args, ctx) => {
       const cwd = ctx.cwd ?? process.cwd();
-      const mode = await ctx.ui.select("Project mode", [
+      const mode = await selectChoice(ctx, "Project mode", [
         { label: "Standalone novel", value: "standalone" },
         { label: "Finite series", value: "series" },
         { label: "Indefinite web serial", value: "serial" }
-      ] as any);
+      ]);
       const title = await ctx.ui.input("Project title", "");
       const createSlug = `phase3-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
       const createPayload = {
@@ -568,9 +605,9 @@ export function registerCommands(pi: ExtensionAPI) {
         return;
       }
 
-      await pi.sendMessage(
+      await sendCommandMessage(
+        pi,
         `Created ${asString(project.slug) ? `project "${asString(project.slug)}"` : "new project"} with premise gate ${asString(gate.id) || "pending"}. Please review premise options and approve in the UI.`,
-        { deliverAs: "nextTurn", triggerTurn: true }
       );
     }
   });
@@ -590,17 +627,17 @@ export function registerCommands(pi: ExtensionAPI) {
     const cwd = ctx.cwd ?? process.cwd();
     const projectContext = await resolveCurrentSerialProject(cwd);
     if (!projectContext) {
-      await pi.sendMessage(
+      await sendCommandMessage(
+        pi,
         "No active Story OS project found. Run /novel:new first.",
-        { deliverAs: "nextTurn", triggerTurn: true }
       );
       return null;
     }
 
     if (projectContext.mode !== "serial") {
-      await pi.sendMessage(
+      await sendCommandMessage(
+        pi,
         `Serial commands require an active serial project. Current project mode is ${projectContext.mode || "unknown"}.`,
-        { deliverAs: "nextTurn", triggerTurn: true }
       );
       return null;
     }
@@ -616,7 +653,7 @@ export function registerCommands(pi: ExtensionAPI) {
     cwd: string
   ) => {
     const result = await postSerialCommand(pi, commandName, route, projectContext, request, cwd);
-    await pi.sendMessage([result.message, ...result.guidance].join("\n"), { deliverAs: "nextTurn", triggerTurn: true });
+    await sendCommandMessage(pi, [result.message, ...result.guidance].join("\n"));
   };
 
   pi.registerCommand("serial:plan-season", {
@@ -630,7 +667,7 @@ export function registerCommands(pi: ExtensionAPI) {
       const titleFromArg = asString(argsRecord.title || argsRecord.seasonTitle || argsRecord.name);
       const title = titleFromArg || await ctx.ui.input("Season title", "");
       if (!title) {
-        await pi.sendMessage("Season planning requires a season title.", { deliverAs: "nextTurn", triggerTurn: true });
+        await sendCommandMessage(pi, "Season planning requires a season title.");
         return;
       }
 
@@ -662,16 +699,16 @@ export function registerCommands(pi: ExtensionAPI) {
       const scopeArg = asString(argsRecord.scopeType || argsRecord.scope || argsRecord.type);
       const scopeType = serialArcScopes.includes(scopeArg as SerialArcScope)
         ? (scopeArg as SerialArcScope)
-        : await ctx.ui.select("Arc scope", serialArcScopes.map((scope) => ({ label: scope, value: scope })) as any);
+        : await selectChoice(ctx, "Arc scope", serialArcScopes.map((scope) => ({ label: scope, value: scope })));
       if (!scopeType) {
-        await pi.sendMessage("Arc planning requires a scope type.", { deliverAs: "nextTurn", triggerTurn: true });
+        await sendCommandMessage(pi, "Arc planning requires a scope type.");
         return;
       }
 
       const titleFromArg = asString(argsRecord.title || argsRecord.arcTitle || argsRecord.name);
       const title = titleFromArg || await ctx.ui.input("Arc title", "");
       if (!title) {
-        await pi.sendMessage("Arc planning requires a title.", { deliverAs: "nextTurn", triggerTurn: true });
+        await sendCommandMessage(pi, "Arc planning requires a title.");
         return;
       }
 
@@ -731,9 +768,9 @@ export function registerCommands(pi: ExtensionAPI) {
       const audienceArg = asString(argsRecord.audience);
       const audience = serialRecapAudiences.includes(audienceArg as SerialRecapAudience)
         ? (audienceArg as SerialRecapAudience)
-        : await ctx.ui.select("Recap audience", serialRecapAudiences.map((entry) => ({ label: entry, value: entry })) as any);
+        : await selectChoice(ctx, "Recap audience", serialRecapAudiences.map((entry) => ({ label: entry, value: entry })));
       if (!audience) {
-        await pi.sendMessage("Recap generation requires an audience.", { deliverAs: "nextTurn", triggerTurn: true });
+        await sendCommandMessage(pi, "Recap generation requires an audience.");
         return;
       }
 
@@ -764,18 +801,18 @@ export function registerCommands(pi: ExtensionAPI) {
     const projectStatus = await storyOsPost("/api/project/status", {}, { cwd });
     if (!isStoryCallOk(projectStatus)) {
       const statusError = asString(unwrapStoryData(projectStatus).error) || asString(unwrapStoryData(projectStatus).code);
-      await pi.sendMessage(
+      await sendCommandMessage(
+        pi,
         `Unable to reach or query Story OS MCP: ${statusError || "unknown"}`,
-        { deliverAs: "nextTurn", triggerTurn: true }
       );
       return;
     }
 
     const projectSlug = resolveProjectSlug(projectStatus);
     if (!projectSlug) {
-      await pi.sendMessage(
+      await sendCommandMessage(
+        pi,
         "No active Story OS project found. Run /novel:new first.",
-        { deliverAs: "nextTurn", triggerTurn: true }
       );
       return;
     }
@@ -810,11 +847,11 @@ export function registerCommands(pi: ExtensionAPI) {
         }
       }
 
-      await pi.sendMessage(lines.join("\n"), { deliverAs: "nextTurn", triggerTurn: true });
+      await sendCommandMessage(pi, lines.join("\n"));
     } catch (error) {
-      await pi.sendMessage(
+      await sendCommandMessage(
+        pi,
         `Chapter workflow could not continue: ${error instanceof Error ? error.message : "unknown error"}`,
-        { deliverAs: "nextTurn", triggerTurn: true }
       );
     }
   };
@@ -837,7 +874,7 @@ export function registerCommands(pi: ExtensionAPI) {
     pi.registerCommand(name, {
       description: instruction,
       handler: async (_args, _ctx) => {
-        await pi.sendMessage(instruction, { deliverAs: "nextTurn", triggerTurn: true });
+        await sendCommandMessage(pi, instruction);
       }
     });
   }

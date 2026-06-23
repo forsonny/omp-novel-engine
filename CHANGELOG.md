@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.8 - 2026-06-23
+
+- Fixed OMP command selection prompts to pass string options for `/novel:new`, serial arc planning, and serial recap generation.
+- Routed OMP command continuations through user-message turns to avoid empty or provider-incompatible custom message continuations.
+- Added runtime smoke coverage for the `/novel:new` UI selection and command-continuation path.
+
 ## 0.5.7 - 2026-06-23
 
 - Reworked the README into a public-facing setup, architecture, command, configuration, and troubleshooting guide.
