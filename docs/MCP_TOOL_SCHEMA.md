@@ -1,10 +1,16 @@
-# Story OS MCP Tool Schema Draft
+# Story OS MCP Tool Schema
 
-Phase 2 must implement these as real MCP tools exposed through OMP as `mcp__novel_story_os__...` names.
+Story OS MCP tools are exposed through the `novel-story-os` MCP server. The live `tools/list` response is the source of truth for tool names, descriptions, and JSON input schemas.
 
 ## Required tool groups
 
-See `BUILD_SPEC.md`, section 8.
+- Project lifecycle and context.
+- Canon facts, knowledge graph entities, relationships, events, and graph exports.
+- Planning artifacts, gates, and human decision records.
+- Chapter outlines, variants, drafts, completion, exports, and audits.
+- Serial seasons, arcs, episodes, promises, recaps, and season reports.
+
+The protocol smoke test verifies that every advertised tool has a non-empty input schema.
 
 ## Tool result conventions
 
@@ -32,4 +38,4 @@ Errors must return:
 
 ## Gate-safe mutation rule
 
-No MCP mutation tool may mark a gate approved unless the input includes a human decision recorded from an OMP UI confirmation. Model-generated approval is invalid.
+No MCP mutation tool may mark a gate approved unless the input includes a human decision recorded from an OMP UI confirmation. Model-generated approval is invalid. When the Docker service wrapper starts Story OS, gate approval also requires a valid confirmation nonce.

@@ -2,13 +2,15 @@ services:
   story-os-mcp:
     build:
       context: ./story-os-mcp
-    container_name: novel-story-os-mcp
     ports:
-      - "7127:7127"
+      - "${STORY_OS_HOST_BIND:-127.0.0.1}:${STORY_OS_HOST_PORT:-7127}:7127"
     environment:
       STORY_OS_HOST: "0.0.0.0"
       STORY_OS_PORT: "7127"
       STORY_OS_WORKSPACE: "/workspace"
+      STORY_OS_WORKSPACE_ID: "${STORY_OS_WORKSPACE_ID:-omp-novel-engine}"
+      STORY_OS_AUTH_TOKEN: "${STORY_OS_AUTH_TOKEN:-}"
+      STORY_OS_GATE_DECISION_SECRET: "${STORY_OS_GATE_DECISION_SECRET:-}"
       STORY_OS_DB_ROOT: "/workspace/stories"
       QDRANT_URL: "http://qdrant:6333"
     volumes:
@@ -20,9 +22,8 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.12.6
-    container_name: novel-qdrant
     ports:
-      - "6333:6333"
+      - "${QDRANT_HOST_BIND:-127.0.0.1}:${QDRANT_HOST_PORT:-6333}:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 

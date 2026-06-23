@@ -1,6 +1,6 @@
 {
   "name": "omp-novel-engine",
-  "version": "0.5.2",
+  "version": "0.5.6",
   "private": true,
   "description": "OMP extension workspace for planning, drafting, auditing, and exporting novels, series, and serials.",
   "type": "module",
@@ -20,9 +20,11 @@
   "scripts": {
     "doctor": "bun run scripts/check-setup.ts",
     "setup": "bun run scripts/check-setup.ts",
-    "services:up": "docker compose -f docker/compose.yml up -d --build && bun run scripts/wait-for-services.ts",
+    "check:server": "bun run docker/story-os-mcp/scripts/check.ts",
+    "check": "bun run check:server",
+    "services:up": "bun run scripts/services.ts up",
     "services:wait": "bun run scripts/wait-for-services.ts",
-    "services:down": "docker compose -f docker/compose.yml down",
+    "services:down": "bun run scripts/services.ts down",
     "backup": "bun run scripts/backup-project.ts backup",
     "backup:demo": "bun run scripts/backup-project.ts backup --project demo",
     "restore": "bun run scripts/backup-project.ts restore",

@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -32,10 +33,15 @@ const port = Number(process.env.STORY_OS_PORT || 7127);
 const workspaceRoot = resolve(process.env.STORY_OS_WORKSPACE || process.cwd());
 const storiesRoot = join(workspaceRoot, "stories");
 const schemaFile = resolve(import.meta.dir ?? process.cwd(), "../schema.sql");
+const qdrantUrl = process.env.QDRANT_URL || "";
+const workspaceId = process.env.STORY_OS_WORKSPACE_ID?.trim() ||
+  createHash("sha256").update(workspaceRoot.replace(/\\/g, "/").toLowerCase()).digest("hex").slice(0, 16);
+const authToken = process.env.STORY_OS_AUTH_TOKEN?.trim() || "";
+const gateDecisionSecret = process.env.STORY_OS_GATE_DECISION_SECRET?.trim() || authToken;
 
 const MCP_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const MCP_SCHEMA_VERSION = "schema.sql@v5";
-const MCP_SERVER_VERSION = "0.5.2";
+const MCP_SCHEMA_VERSION = "schema.sql@v6";
+const MCP_SERVER_VERSION = "0.5.6";
 const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 const ALLOWED_GATE_DECISION_STATUSES = ["approved", "rejected", "needs_revision", "blocked_by_audit"] as const;
 const BLOCKING_GATE_STATUSES = new Set<string>(["blocked_by_audit"]);
@@ -542,6 +548,332 @@ const MCP_TOOLS = [
   }
 ] as const;
 
+const stringSchema = { type: "string" };
+const numberSchema = { type: "number" };
+const booleanSchema = { type: "boolean" };
+const objectValueSchema = { type: "object", additionalProperties: true };
+const arrayValueSchema = { type: "array", items: {} };
+
+function inputSchema(properties: JsonObject, required: string[] = []): JsonObject {
+  return {
+    type: "object",
+    properties,
+    required,
+    additionalProperties: true
+  };
+}
+
+const projectSlugSchema = inputSchema({ projectSlug: stringSchema }, ["projectSlug"]);
+const scopedProjectSchema = inputSchema({
+  projectSlug: stringSchema,
+  scopeType: stringSchema,
+  scopeId: stringSchema,
+  gateType: stringSchema
+}, ["projectSlug"]);
+const chapterSchema = inputSchema({
+  projectSlug: stringSchema,
+  chapterId: stringSchema
+}, ["projectSlug", "chapterId"]);
+const arcSchema = inputSchema({
+  projectSlug: stringSchema,
+  arcId: stringSchema
+}, ["projectSlug", "arcId"]);
+
+const TOOL_INPUT_SCHEMAS: Record<string, JsonObject> = {
+  story_project_create: inputSchema({
+    slug: stringSchema,
+    title: stringSchema,
+    mode: { type: "string", enum: ["standalone", "series", "serial"] }
+  }, ["slug", "mode"]),
+  story_project_status: inputSchema({ projectSlug: stringSchema }),
+  story_canon_upsert_fact: inputSchema({
+    projectSlug: stringSchema,
+    entityId: stringSchema,
+    factType: stringSchema,
+    factText: stringSchema,
+    sourceRef: stringSchema,
+    confidence: numberSchema,
+    locked: booleanSchema,
+    supersedesFactId: stringSchema
+  }, ["projectSlug", "factType", "factText", "sourceRef"]),
+  story_canon_search: inputSchema({
+    projectSlug: stringSchema,
+    query: stringSchema,
+    entityId: stringSchema,
+    factType: stringSchema,
+    limit: numberSchema
+  }, ["projectSlug"]),
+  story_kg_upsert_entity: inputSchema({
+    projectSlug: stringSchema,
+    id: stringSchema,
+    type: stringSchema,
+    name: stringSchema,
+    aliases: arrayValueSchema,
+    description: stringSchema,
+    status: stringSchema,
+    firstSeenRef: stringSchema,
+    lastSeenRef: stringSchema
+  }, ["projectSlug", "type", "name"]),
+  story_kg_upsert_relationship: inputSchema({
+    projectSlug: stringSchema,
+    id: stringSchema,
+    sourceEntityId: stringSchema,
+    targetEntityId: stringSchema,
+    relationshipType: stringSchema,
+    state: stringSchema,
+    sourceRef: stringSchema
+  }, ["projectSlug", "sourceEntityId", "targetEntityId", "relationshipType"]),
+  story_kg_export_jsonl: projectSlugSchema,
+  story_kg_upsert_event: inputSchema({
+    projectSlug: stringSchema,
+    id: stringSchema,
+    title: stringSchema,
+    summary: stringSchema,
+    eventType: stringSchema,
+    timeLabel: stringSchema,
+    chronologyIndex: numberSchema,
+    sourceRef: stringSchema
+  }, ["projectSlug", "title"]),
+  story_kg_export_mermaid: projectSlugSchema,
+  story_event_graph_create: inputSchema({
+    projectSlug: stringSchema,
+    title: stringSchema,
+    artifactKey: stringSchema
+  }, ["projectSlug"]),
+  story_event_graph_upsert_node: inputSchema({
+    projectSlug: stringSchema,
+    eventId: stringSchema,
+    title: stringSchema,
+    summary: stringSchema,
+    chronologyIndex: numberSchema,
+    sourceRef: stringSchema
+  }, ["projectSlug", "title"]),
+  story_event_graph_upsert_edge: inputSchema({
+    projectSlug: stringSchema,
+    id: stringSchema,
+    fromEventId: stringSchema,
+    toEventId: stringSchema,
+    edgeType: stringSchema,
+    rationale: stringSchema
+  }, ["projectSlug", "fromEventId", "toEventId", "edgeType"]),
+  story_event_graph_validate_causality: projectSlugSchema,
+  story_event_graph_export_mermaid: projectSlugSchema,
+  story_export_mermaid_diagrams: projectSlugSchema,
+  story_gate_create: inputSchema({
+    projectSlug: stringSchema,
+    scopeType: stringSchema,
+    scopeId: stringSchema,
+    gateType: stringSchema,
+    status: stringSchema,
+    required: booleanSchema
+  }, ["projectSlug", "scopeType", "scopeId", "gateType"]),
+  story_gate_status: scopedProjectSchema,
+  story_gate_record_human_decision: inputSchema({
+    projectSlug: stringSchema,
+    gateId: stringSchema,
+    scopeType: stringSchema,
+    scopeId: stringSchema,
+    gateType: stringSchema,
+    decision: { type: "string", enum: [...ALLOWED_GATE_DECISION_STATUSES] },
+    humanDecision: { type: "string", enum: [...ALLOWED_GATE_DECISION_STATUSES] },
+    decisionSource: stringSchema,
+    humanConfirmed: booleanSchema,
+    confirmationNonce: stringSchema,
+    notes: stringSchema,
+    decidedBy: stringSchema,
+    decisionMetadata: objectValueSchema
+  }, ["projectSlug", "decisionSource", "humanConfirmed"]),
+  story_gate_blockers: scopedProjectSchema,
+  story_chapter_outline_record: inputSchema({
+    projectSlug: stringSchema,
+    chapterId: stringSchema,
+    chapterNumber: numberSchema,
+    title: stringSchema,
+    containerType: stringSchema,
+    containerId: stringSchema,
+    outlineMarkdown: stringSchema,
+    outlinePath: stringSchema
+  }, ["projectSlug", "chapterId"]),
+  story_chapter_variant_create: inputSchema({
+    projectSlug: stringSchema,
+    chapterId: stringSchema,
+    variantType: { type: "string", enum: [...CHAPTER_VARIANT_TYPES] },
+    purpose: stringSchema,
+    markdownText: stringSchema,
+    markdownPath: stringSchema,
+    changedStructurally: stringSchema,
+    changedEmotionally: stringSchema,
+    changedInPacing: stringSchema,
+    canonRisk: stringSchema,
+    continuityRisk: stringSchema,
+    bestUseCase: stringSchema,
+    reasonToChoose: stringSchema,
+    reasonNotToChoose: stringSchema
+  }, ["projectSlug", "chapterId", "variantType", "purpose"]),
+  story_chapter_variant_list: chapterSchema,
+  story_chapter_variant_rank: chapterSchema,
+  story_chapter_variant_select: inputSchema({
+    projectSlug: stringSchema,
+    chapterId: stringSchema,
+    variantId: stringSchema,
+    selectionReason: stringSchema
+  }, ["projectSlug", "chapterId", "variantId"]),
+  story_chapter_draft_record: inputSchema({
+    projectSlug: stringSchema,
+    chapterId: stringSchema,
+    variantId: stringSchema,
+    draftStage: stringSchema,
+    status: stringSchema,
+    markdownText: stringSchema,
+    markdownPath: stringSchema,
+    revisionNotes: stringSchema,
+    provenance: objectValueSchema
+  }, ["projectSlug", "chapterId", "variantId", "draftStage", "markdownText"]),
+  story_chapter_complete_mark: inputSchema({
+    projectSlug: stringSchema,
+    chapterId: stringSchema,
+    completionNotes: stringSchema
+  }, ["projectSlug", "chapterId"]),
+  story_serial_season_plan: inputSchema({
+    projectSlug: stringSchema,
+    seasonId: stringSchema,
+    seasonNumber: numberSchema,
+    title: stringSchema,
+    status: { type: "string", enum: [...SERIAL_SEASON_STATUSES] },
+    promiseSummary: stringSchema,
+    arcId: stringSchema
+  }, ["projectSlug", "title"]),
+  story_serial_arc_plan: inputSchema({
+    projectSlug: stringSchema,
+    seasonId: stringSchema,
+    arcId: stringSchema,
+    title: stringSchema,
+    beats: arrayValueSchema
+  }, ["projectSlug"]),
+  story_serial_next_episode: inputSchema({
+    projectSlug: stringSchema,
+    seasonId: stringSchema,
+    episodeId: stringSchema,
+    episodeNumber: numberSchema,
+    chapterId: stringSchema,
+    episodeTitle: stringSchema,
+    releaseLabel: stringSchema
+  }, ["projectSlug"]),
+  story_serial_promise_upsert: inputSchema({
+    projectSlug: stringSchema,
+    id: stringSchema,
+    title: stringSchema,
+    category: { type: "string", enum: [...SERIAL_PROMISE_CATEGORIES] },
+    status: { type: "string", enum: [...SERIAL_PROMISE_STATUSES] },
+    visibility: { type: "string", enum: [...SERIAL_PROMISE_VISIBILITIES] },
+    priority: numberSchema,
+    sourceEpisodeId: stringSchema,
+    targetScopeType: { type: "string", enum: [...SERIAL_SCOPES] },
+    targetScopeId: stringSchema,
+    payoffEpisodeId: stringSchema,
+    notes: stringSchema,
+    sourceRef: stringSchema
+  }, ["projectSlug", "title"]),
+  story_serial_promise_list: inputSchema({
+    projectSlug: stringSchema,
+    status: { type: "string", enum: [...SERIAL_PROMISE_STATUSES] },
+    visibility: { type: "string", enum: [...SERIAL_PROMISE_VISIBILITIES] },
+    scopeType: { type: "string", enum: [...SERIAL_SCOPES] },
+    scopeId: stringSchema
+  }, ["projectSlug"]),
+  story_serial_recap_generate: inputSchema({
+    projectSlug: stringSchema,
+    scopeType: { type: "string", enum: ["episode", "season"] },
+    scopeId: stringSchema,
+    audience: { type: "string", enum: [...SERIAL_RECAP_AUDIENCES] },
+    seasonId: stringSchema,
+    episodeId: stringSchema
+  }, ["projectSlug", "scopeType", "scopeId", "audience"]),
+  story_serial_season_report: inputSchema({
+    projectSlug: stringSchema,
+    seasonId: stringSchema
+  }, ["projectSlug"]),
+  story_premise_record: scopedProjectSchema,
+  story_worldbuilding_record: scopedProjectSchema,
+  story_series_bible_record: scopedProjectSchema,
+  story_pov_plan_record: scopedProjectSchema,
+  story_beatmap_record: inputSchema({
+    projectSlug: stringSchema,
+    arcId: stringSchema,
+    beats: arrayValueSchema,
+    title: stringSchema,
+    scopeType: stringSchema,
+    scopeId: stringSchema
+  }, ["projectSlug", "arcId", "beats"]),
+  story_audit_run: inputSchema({
+    projectSlug: stringSchema,
+    auditRunId: stringSchema,
+    scopeType: stringSchema,
+    scopeId: stringSchema,
+    auditType: stringSchema,
+    status: stringSchema,
+    summary: objectValueSchema,
+    artifactPath: stringSchema,
+    provenance: objectValueSchema
+  }, ["projectSlug", "scopeType", "scopeId", "auditType"]),
+  story_audit_get_report: inputSchema({
+    projectSlug: stringSchema,
+    auditRunId: stringSchema,
+    scopeType: stringSchema,
+    scopeId: stringSchema
+  }, ["projectSlug"]),
+  story_audit_record_finding: inputSchema({
+    projectSlug: stringSchema,
+    auditRunId: stringSchema,
+    category: stringSchema,
+    severity: stringSchema,
+    quoteOrLocation: stringSchema,
+    whyFlagged: stringSchema,
+    fixStrategy: stringSchema,
+    findingKey: stringSchema,
+    evidence: objectValueSchema
+  }, ["projectSlug", "auditRunId", "category", "severity", "quoteOrLocation", "whyFlagged", "fixStrategy"]),
+  story_audit_export_occurrence_inventory: inputSchema({
+    projectSlug: stringSchema,
+    auditRunId: stringSchema,
+    scopeType: stringSchema,
+    scopeId: stringSchema
+  }, ["projectSlug"]),
+  story_export_markdown_chapter: inputSchema({
+    projectSlug: stringSchema,
+    chapterId: stringSchema,
+    outputPath: stringSchema
+  }, ["projectSlug", "chapterId"]),
+  story_arc_create: inputSchema({
+    projectSlug: stringSchema,
+    scope: stringSchema,
+    ownerId: stringSchema,
+    title: stringSchema,
+    status: stringSchema
+  }, ["projectSlug", "scope", "title"]),
+  story_arc_get: arcSchema,
+  story_arc_update: inputSchema({
+    projectSlug: stringSchema,
+    arcId: stringSchema,
+    title: stringSchema,
+    status: stringSchema,
+    scope: stringSchema,
+    ownerId: stringSchema
+  }, ["projectSlug", "arcId"]),
+  story_arc_validate_seven_point: arcSchema,
+  story_arc_list_by_scope: inputSchema({
+    projectSlug: stringSchema,
+    scope: stringSchema,
+    ownerId: stringSchema
+  }, ["projectSlug", "scope"]),
+  story_arc_export_mermaid: arcSchema
+};
+
+for (const tool of MCP_TOOLS) {
+  const schema = TOOL_INPUT_SCHEMAS[tool.name] ?? projectSlugSchema;
+  (tool as { inputSchema: JsonObject }).inputSchema = schema;
+}
+
 type DbProject = {
   id: string;
   slug: string;
@@ -893,17 +1225,102 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function statusForErrorCode(code: string | undefined): number {
+  if (!code) return 500;
+  if (code.includes("NOT_FOUND")) return 404;
+  if (code.includes("CONFLICT") || code.includes("DUPLICATE")) return 409;
+  if (
+    code.includes("INVALID") ||
+    code.includes("MISSING") ||
+    code.includes("UNAUTHORIZED") ||
+    code.includes("PATH_OUTSIDE")
+  ) {
+    return code.includes("UNAUTHORIZED") ? 403 : 400;
+  }
+  return 500;
+}
+
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function readJson(req: Request): Promise<JsonObject> {
+  const rawText = await req.text();
+  if (rawText.trim().length === 0) return {};
+
   try {
-    const raw = await req.json();
+    const raw = JSON.parse(rawText) as unknown;
     return isObject(raw) ? raw : {};
   } catch {
-    return {};
+    throw Object.assign(new Error("Invalid JSON body"), { code: "INVALID_JSON" });
   }
+}
+
+function createGateDecisionNonce(projectSlug: string, gateReference: string, gateStatus: string): string {
+  return createHmac("sha256", gateDecisionSecret)
+    .update(`${projectSlug}:${gateReference}:${gateStatus}`)
+    .digest("hex");
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function gateDecisionReference(args: JsonObject): string {
+  const gateId = typeof args.gateId === "string" ? args.gateId.trim() : "";
+  if (gateId) return `gate:${gateId}`;
+  const gateType = typeof args.gateType === "string" ? args.gateType.trim() : "";
+  return gateType ? `type:${gateType}` : "";
+}
+
+function requireGateDecisionNonce(args: JsonObject, projectSlug: string, gateStatus: string): void {
+  if (!gateDecisionSecret) return;
+  const provided = typeof args.confirmationNonce === "string" ? args.confirmationNonce.trim() : "";
+  const reference = gateDecisionReference(args);
+  if (!provided || !reference) {
+    throw Object.assign(new Error("Gate decisions require a valid confirmation nonce"), {
+      code: "UNAUTHORIZED_GATE_DECISION"
+    });
+  }
+
+  const expected = createGateDecisionNonce(projectSlug, reference, gateStatus);
+  if (!constantTimeEqual(provided, expected)) {
+    throw Object.assign(new Error("Gate decision confirmation nonce is invalid"), {
+      code: "UNAUTHORIZED_GATE_DECISION"
+    });
+  }
+}
+
+function requestHostName(req: Request): string {
+  const hostHeader = req.headers.get("host") || "";
+  const host = hostHeader.split(":")[0]?.toLowerCase() || "";
+  return host.replace(/^\[|\]$/g, "");
+}
+
+function isLocalRequest(req: Request): boolean {
+  const hostName = requestHostName(req);
+  return hostName === "127.0.0.1" || hostName === "localhost" || hostName === "::1";
+}
+
+function hasValidRequestAuth(req: Request): boolean {
+  if (!authToken) return false;
+  const authorization = req.headers.get("authorization") || "";
+  const bearer = authorization.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : "";
+  const headerToken = req.headers.get("x-story-os-token") || "";
+  return constantTimeEqual(bearer || headerToken, authToken);
+}
+
+function rejectUnsafeExternalMutation(req: Request, url: URL): Response | null {
+  if (req.method === "GET") return null;
+  if (isLocalRequest(req)) return null;
+  if ((url.pathname === "/mcp" || url.pathname.startsWith("/api/")) && hasValidRequestAuth(req)) return null;
+  if (url.pathname === "/mcp" || url.pathname.startsWith("/api/")) {
+    return json(mcpError("UNAUTHORIZED_REQUEST", "Non-local mutations require Story OS authorization", true), 403);
+  }
+  return null;
 }
 
 function sanitizeSlug(input: string): string {
@@ -2140,10 +2557,16 @@ function normalizeScopeId(project: DbProject, args: JsonObject, scopeTypeFallbac
 
 function createOrUpdateProject(args: JsonObject): McpToolResult {
   try {
-    const inputTitle = typeof args.title === "string" && args.title.trim().length > 0 ? args.title : "Untitled Project";
-    const candidateSlug = typeof args.slug === "string" ? args.slug : inputTitle;
+    if (typeof args.slug !== "string" || args.slug.trim().length === 0) {
+      throw Object.assign(new Error("Missing required parameter: slug"), { code: "INVALID_PARAMS" });
+    }
+    if (typeof args.mode !== "string" || args.mode.trim().length === 0) {
+      throw Object.assign(new Error("Missing required parameter: mode"), { code: "INVALID_PARAMS" });
+    }
+    const inputTitle = typeof args.title === "string" && args.title.trim().length > 0 ? args.title : args.slug;
+    const candidateSlug = args.slug;
     const slug = validateSlug(candidateSlug, "project");
-    const mode = typeof args.mode === "string" ? args.mode : "standalone";
+    const mode = args.mode.trim();
 
     const result = withProjectDb(slug, (db) => {
       const createdAt = now();
@@ -2629,6 +3052,7 @@ function recordGateDecisionTool(args: JsonObject): McpToolResult {
         code: "INVALID_PARAMS"
       });
     }
+    requireGateDecisionNonce(args, projectSlug, gateStatus);
     const humanDecision = providedHumanDecision ?? gateStatus;
 
     const result = withProjectDb(projectSlug, (db) => {
@@ -5725,11 +6149,14 @@ function runToolApi(toolName: string, req: Request): Promise<Response> {
     }
     try {
       const result = handler(body);
-      const status = result.ok ? 200 : 500;
+      const status = result.ok ? 200 : statusForErrorCode(result.code);
       return json(result, status);
     } catch (error) {
       const err = error as { code?: string; message?: string };
-      return json(mcpError(err.code || "HANDLER_ERROR", err.message || "Tool handler failed", true), 500);
+      return json(
+        mcpError(err.code || "HANDLER_ERROR", err.message || "Tool handler failed", true),
+        statusForErrorCode(err.code)
+      );
     }
   })();
 }
@@ -5860,13 +6287,22 @@ const server = Bun.serve({
   port,
   async fetch(req) {
     const url = new URL(req.url);
+    const externalMutationRejection = rejectUnsafeExternalMutation(req, url);
+    if (externalMutationRejection) return externalMutationRejection;
 
+    try {
     if (url.pathname === "/health") {
       return json({
         ok: true,
         service: "story-os-mcp",
         time: now(),
-        version: MCP_SERVER_VERSION
+        version: MCP_SERVER_VERSION,
+        schemaVersion: MCP_SCHEMA_VERSION,
+        workspaceId,
+        workspaceRoot,
+        qdrantUrlConfigured: qdrantUrl.length > 0,
+        authRequiredForExternalMutation: true,
+        gateDecisionNonceRequired: gateDecisionSecret.length > 0
       });
     }
 
@@ -5886,7 +6322,7 @@ const server = Bun.serve({
     if (url.pathname === "/api/project/create" && req.method === "POST") {
       const body = await readJson(req);
       const result = createOrUpdateProject(body);
-      return json(result, result.ok ? 200 : 500);
+      return json(result, result.ok ? 200 : statusForErrorCode(result.code));
     }
 
     if (url.pathname === "/api/project/status") {
@@ -5980,6 +6416,13 @@ const server = Bun.serve({
     }
 
     return json({ ok: false, error: "not found", path: url.pathname }, 404);
+    } catch (error) {
+      const err = error as { code?: string; message?: string };
+      return json(
+        mcpError(err.code || "REQUEST_ERROR", err.message || "Request failed", true),
+        statusForErrorCode(err.code)
+      );
+    }
   }
 });
 

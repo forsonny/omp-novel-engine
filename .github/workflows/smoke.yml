@@ -21,6 +21,9 @@ jobs:
       - name: Install package metadata
         run: bun install --no-save
 
+      - name: Run static checks
+        run: bun run check
+
       - name: Run offline smoke checks
         run: bun run smoke:offline
 

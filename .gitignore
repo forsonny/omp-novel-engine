@@ -10,6 +10,7 @@ Thumbs.db
 # Agent/session-local state
 .codex/
 .agents/
+.agent-notes/
 *.log
 *.pid
 omp-session-*.html
@@ -26,13 +27,26 @@ tmp/
 *.zip
 backups/
 
+# Local planning/build artifacts
+BUILD_SPEC.md
+BUILD_KIT_MANIFEST.md
+DECISIONS.yml
+START_HERE_PROMPT_FOR_OMP.md
+docs/IMPLEMENTATION_CHECKLIST.md
+
 # Runtime story data
 stories/*
 !stories/.gitkeep
 !stories/demo/
+stories/demo/*
 !stories/demo/project.yml
 !stories/demo/diagrams/
+stories/demo/diagrams/*
 !stories/demo/diagrams/seven-point-map.mmd
+stories/demo/canon/
+stories/demo/chapters/
+stories/demo/memory/
+stories/demo/recaps/
 stories/**/canon/*.db
 stories/**/canon/*.db-*
 *.sqlite
@@ -49,5 +63,8 @@ docker/story-os-mcp/stories/*
 !docker/story-os-mcp/stories/.gitkeep
 
 # Local reference material; keep public metadata only
+references/external/
+references/reference_manifest.json
+references/reference_manifest.md
 references/uploaded/**
 !references/uploaded/README.md

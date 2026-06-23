@@ -9,7 +9,7 @@ Each chapter needs a goal, scene job, canon constraints, continuity notes, and e
 
 ## Required behavior
 
-- Follow `BUILD_SPEC.md`.
+- Follow the active Story OS workflow constraints.
 - Use Story OS MCP for durable canon and memory.
 - Stop at human approval gates.
 - Never mark a chapter complete without mandatory gate pass and human approval.

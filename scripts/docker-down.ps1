@@ -1,2 +1,2 @@
 $ErrorActionPreference = "Stop"
-docker compose -f docker/compose.yml down
+bun run scripts/services.ts down

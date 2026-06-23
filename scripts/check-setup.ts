@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { qdrantBaseUrl, storyOsBaseUrl, storyOsWorkspaceId } from "./story-os-env";
 
 type Check = {
   name: string;
@@ -59,15 +60,28 @@ add(
   ompVersion.status === 0 ? ompVersion.stdout : "Install Oh My Pi and add omp to PATH",
 );
 
+const expectedWorkspaceId = process.env.STORY_OS_WORKSPACE_ID || storyOsWorkspaceId();
 const healthUrls = [
-  { name: "Story OS MCP health", url: "http://127.0.0.1:7127/health" },
-  { name: "Qdrant collections", url: "http://127.0.0.1:6333/collections" },
+  { name: "Story OS MCP health", url: `${storyOsBaseUrl()}/health` },
+  { name: "Qdrant collections", url: `${qdrantBaseUrl()}/collections` },
 ];
 
 for (const target of healthUrls) {
   try {
     const response = await fetch(target.url, { signal: AbortSignal.timeout(1500) });
-    add(target.name, response.ok, response.ok ? `${target.url} responded` : `${target.url} returned HTTP ${response.status}`, false);
+    const payload = await response.json().catch(() => ({}));
+    const workspaceMatches = target.name !== "Story OS MCP" ||
+      (payload && typeof payload === "object" && "workspaceId" in payload && payload.workspaceId === expectedWorkspaceId);
+    add(
+      target.name,
+      response.ok && workspaceMatches,
+      response.ok
+        ? workspaceMatches
+          ? `${target.url} responded`
+          : `${target.url} responded with a different workspace identity`
+        : `${target.url} returned HTTP ${response.status}`,
+      false
+    );
   } catch {
     add(target.name, true, `${target.url} is not running yet; start services with bun run services:up`, false);
   }

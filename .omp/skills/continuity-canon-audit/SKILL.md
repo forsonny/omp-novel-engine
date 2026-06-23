@@ -9,7 +9,7 @@ Ground contradictions in evidence. All canon categories matter equally.
 
 ## Required behavior
 
-- Follow `BUILD_SPEC.md`.
+- Follow the active Story OS workflow constraints.
 - Use Story OS MCP for durable canon and memory.
 - Stop at human approval gates.
 - Never mark a chapter complete without mandatory gate pass and human approval.

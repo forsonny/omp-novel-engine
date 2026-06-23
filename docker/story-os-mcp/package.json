@@ -1,6 +1,6 @@
 {
   "name": "story-os-mcp",
-  "version": "0.5.2",
+  "version": "0.5.6",
   "private": true,
   "description": "Story OS MCP server for the OMP Novel Engine workspace.",
   "type": "module",
@@ -10,7 +10,8 @@
     "bun": ">=1.3.14"
   },
   "scripts": {
-    "start": "bun run src/server.ts"
+    "start": "bun run src/server.ts",
+    "check": "bun run scripts/check.ts"
   },
   "dependencies": {},
   "devDependencies": {}

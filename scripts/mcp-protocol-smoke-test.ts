@@ -1,12 +1,13 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { storyOsAuthHeaders, storyOsBaseUrl, withGateDecisionConfirmation } from "./story-os-env";
 
 type Check = { label: string; ok: boolean; details?: string };
 type JsonObject = Record<string, unknown>;
 type JsonArray = unknown[];
 
-const MCP_ENDPOINT = "http://127.0.0.1:7127/mcp";
-const API_ENDPOINT = "http://127.0.0.1:7127";
+const API_ENDPOINT = storyOsBaseUrl();
+const MCP_ENDPOINT = `${API_ENDPOINT}/mcp`;
 const WORKSPACE_ROOT = resolve(process.env.STORY_OS_WORKSPACE ?? process.cwd());
 const PROJECT_SLUG = `phase2-smoke-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 const PROJECT_DIR = join(WORKSPACE_ROOT, "stories", PROJECT_SLUG);
@@ -70,10 +71,13 @@ const asString = (value: unknown): string => (typeof value === "string" ? value 
 
 const callApi = async (path: string, args: JsonObject = {}, method: "POST" | "GET" = "POST"): Promise<JsonObject> => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const requestArgs = withGateDecisionConfirmation(normalizedPath, args);
   const response = await fetch(`${API_ENDPOINT}${normalizedPath}`, {
     method,
-    headers: method === "GET" ? { accept: "application/json" } : { "Content-Type": "application/json" },
-    body: method === "GET" ? undefined : JSON.stringify(args)
+    headers: method === "GET"
+      ? { accept: "application/json", ...storyOsAuthHeaders() }
+      : { "Content-Type": "application/json", ...storyOsAuthHeaders() },
+    body: method === "GET" ? undefined : JSON.stringify(requestArgs)
   });
 
   const raw = await response.text();
@@ -99,7 +103,7 @@ const callRpc = async (method: string, params?: JsonObject, includeId = true): P
 
   const response = await fetch(MCP_ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...storyOsAuthHeaders() },
     body: JSON.stringify(body),
   });
 
@@ -224,6 +228,14 @@ const run = async () => {
     for (const tool of requiredTools) {
       addCheck(`tools/list includes ${tool}`, tools.some((entry) => entry.name === tool));
     }
+    const toolsWithEmptySchemas = tools
+      .filter((entry) => {
+        const schema = toObject(entry.inputSchema);
+        const properties = toObject(schema.properties);
+        return Object.keys(properties).length === 0;
+      })
+      .map((entry) => asString(entry.name));
+    addCheck("tools/list has non-empty input schemas", toolsWithEmptySchemas.length === 0, toolsWithEmptySchemas.join(", "));
 
     const create = ensureToolOk(
       "story_project_create returns ok",

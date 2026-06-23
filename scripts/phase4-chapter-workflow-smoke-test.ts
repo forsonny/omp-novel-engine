@@ -1,12 +1,13 @@
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
+import { storyOsAuthHeaders, storyOsBaseUrl, withGateDecisionConfirmation } from "./story-os-env";
 
 type Check = { label: string; ok: boolean; details?: string };
 type JsonObject = Record<string, unknown>;
 type JsonArray = unknown[];
 
-const MCP_ENDPOINT = "http://127.0.0.1:7127/mcp";
-const API_ENDPOINT = "http://127.0.0.1:7127";
+const API_ENDPOINT = storyOsBaseUrl();
+const MCP_ENDPOINT = `${API_ENDPOINT}/mcp`;
 const WORKSPACE_ROOT = resolve(process.env.STORY_OS_WORKSPACE ?? process.cwd());
 const PROJECT_SLUG = `phase4-chapter-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 const PROJECT_DIR = join(WORKSPACE_ROOT, "stories", PROJECT_SLUG);
@@ -67,7 +68,7 @@ const toLocalWorkspacePath = (filePath: string): string => {
 const callRpc = async (method: string, params?: JsonObject): Promise<JsonObject | null> => {
   const response = await fetch(MCP_ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...storyOsAuthHeaders() },
     body: JSON.stringify({ jsonrpc: "2.0", id: `phase4-${Math.random().toString(16).slice(2, 10)}`, method, params }),
   });
 
@@ -105,10 +106,13 @@ const callApi = async (
   method: "POST" | "GET" = "POST",
 ): Promise<JsonObject> => {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const requestArgs = withGateDecisionConfirmation(normalizedPath, args);
   const response = await fetch(`${API_ENDPOINT}${normalizedPath}`, {
     method,
-    headers: method === "GET" ? { accept: "application/json" } : { "Content-Type": "application/json" },
-    body: method === "GET" ? undefined : JSON.stringify(args),
+    headers: method === "GET"
+      ? { accept: "application/json", ...storyOsAuthHeaders() }
+      : { "Content-Type": "application/json", ...storyOsAuthHeaders() },
+    body: method === "GET" ? undefined : JSON.stringify(requestArgs),
   });
 
   const raw = await response.text();

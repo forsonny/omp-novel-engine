@@ -9,7 +9,7 @@ Use Hook, First Plot Point, First Pinch, Midpoint, Second Pinch, Second Plot Poi
 
 ## Required behavior
 
-- Follow `BUILD_SPEC.md`.
+- Follow the active Story OS workflow constraints.
 - Use Story OS MCP for durable canon and memory.
 - Stop at human approval gates.
 - Never mark a chapter complete without mandatory gate pass and human approval.

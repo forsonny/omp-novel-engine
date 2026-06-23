@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.6 - 2026-06-23
+
+- Moved the local OMP start prompt out of the published repository surface.
+
+## 0.5.5 - 2026-06-23
+
+- Moved local planning, implementation checklist, decision ledger, and captured reference snapshot files out of the published repository surface.
+- Removed shipped skill and schema references to the local build specification.
+
+## 0.5.4 - 2026-06-23
+
+- Tightened ignore rules for local agent notes and generated demo story diagram artifacts while keeping the tracked demo fixture visible.
+
+## 0.5.3 - 2026-06-23
+
+- Bound Story OS MCP and Qdrant Docker ports to loopback by default and routed service lifecycle through a workspace-aware wrapper.
+- Added workspace identity, schema version, Qdrant configuration state, and gate nonce state to Story OS health responses.
+- Added non-local mutation authorization, gate decision confirmation nonces, invalid JSON rejection, explicit project-create parameters, and mapped API error statuses.
+- Added structured MCP tool input schemas and protocol smoke coverage for non-empty advertised schemas.
+- Added server static build checks to package scripts and CI.
+- Added database indexes for project, scope, gate, chapter, graph, serial, and audit query paths.
+- Updated setup docs and ignore rules for generated demo runtime artifacts.
+- Removed unimplemented batch draft/export script stubs from the shipped script list.
+
 ## 0.5.2 - 2026-06-23
 
 - Reworked onboarding for GitHub clone/download setup across Windows, macOS, and Linux.

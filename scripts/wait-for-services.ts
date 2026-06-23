@@ -1,3 +1,5 @@
+import { qdrantBaseUrl, storyOsBaseUrl, storyOsWorkspaceId } from "./story-os-env";
+
 type Target = {
   name: string;
   url: string;
@@ -15,16 +17,19 @@ const sleep = (ms: number): Promise<void> => {
 };
 
 const isObject = (value: unknown): value is object => typeof value === "object" && value !== null;
+const expectedWorkspaceId = process.env.STORY_OS_WORKSPACE_ID || storyOsWorkspaceId();
+const storyOsUrl = storyOsBaseUrl();
+const qdrantUrl = qdrantBaseUrl();
 
 const targets: Target[] = [
   {
     name: "Story OS MCP",
-    url: "http://127.0.0.1:7127/health",
+    url: `${storyOsUrl}/health`,
     validate: (payload) => isObject(payload) && "ok" in payload && payload.ok === true,
   },
   {
     name: "Qdrant",
-    url: "http://127.0.0.1:6333/collections",
+    url: `${qdrantUrl}/collections`,
     validate: (payload) => {
       if (!isObject(payload)) return false;
       if ("collections" in payload && Array.isArray(payload.collections)) return true;
@@ -39,7 +44,16 @@ const waitForTarget = async (target: Target): Promise<boolean> => {
     try {
       const response = await fetch(target.url, { signal: AbortSignal.timeout(2000) });
       const payload = await response.json();
-      if (target.validate(payload)) {
+      if (
+        target.validate(payload) &&
+        (target.name !== "Story OS MCP" || (
+          isObject(payload) &&
+          "workspaceId" in payload &&
+          payload.workspaceId === expectedWorkspaceId &&
+          "qdrantUrlConfigured" in payload &&
+          payload.qdrantUrlConfigured === true
+        ))
+      ) {
         console.log(`OK ${target.name} is ready at ${target.url}`);
         return true;
       }

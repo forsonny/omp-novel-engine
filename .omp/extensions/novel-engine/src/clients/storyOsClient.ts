@@ -34,6 +34,11 @@ function getRequestTimeoutMs(options?: StoryOsRequestOptions): number {
   return parsed;
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const token = process.env.STORY_OS_AUTH_TOKEN?.trim();
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
 export function getStoryOsBaseUrl(cwd?: string): string {
   const envOverride = process.env.STORY_OS_BASE_URL?.trim();
   if (envOverride) return normalizeBaseUrl(envOverride);
@@ -59,6 +64,7 @@ async function requestStoryOs<T = unknown>(
       signal: controller.signal,
       headers: {
         ...(init.headers ?? {}),
+        ...getAuthHeaders(),
         "accept": "application/json"
       }
     });

@@ -5,5 +5,4 @@ script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P)
 repo_root=$(CDPATH= cd "$script_dir/.." && pwd -P)
 cd "$repo_root"
 
-docker compose -f docker/compose.yml up -d --build
-bun run scripts/wait-for-services.ts
+bun run scripts/services.ts up

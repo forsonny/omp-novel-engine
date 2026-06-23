@@ -126,6 +126,7 @@ bun run services:down
 ```
 
 Use `bun run services:up` before any smoke command that talks to `127.0.0.1:7127`.
+The service wrapper binds Story OS MCP and Qdrant to `127.0.0.1` by default and assigns a workspace-specific Docker Compose project name.
 
 ## Verify setup
 
@@ -138,7 +139,7 @@ curl http://127.0.0.1:7127/health
 Expected shape:
 
 ```json
-{"ok":true,"service":"story-os-mcp","time":"...","version":"..."}
+{"ok":true,"service":"story-os-mcp","time":"...","version":"...","schemaVersion":"...","workspaceId":"...","qdrantUrlConfigured":true}
 ```
 
 Smoke commands:
@@ -212,7 +213,8 @@ Backup and restore commands reject unsafe paths outside the workspace. Restore a
 | `bun: command not found` | Bun is not installed or not on `PATH`. | Install Bun, restart the terminal, run `bun --version`. |
 | `docker: command not found` | Docker CLI is not installed or not on `PATH`. | Install Docker Desktop or Docker Engine, then run `docker --version`. |
 | `Cannot connect to the Docker daemon` | Docker Desktop/daemon is stopped. | Start Docker and rerun setup. |
-| `port is already allocated` for 7127 or 6333 | Another process is using Story OS MCP or Qdrant ports. | Stop the other process or change ports in `docker/compose.yml` and `.omp/novel-engine/config.yml`. |
+| `port is already allocated` for 7127 or 6333 | Another process is using Story OS MCP or Qdrant ports. | Stop the other process or set `STORY_OS_HOST_PORT` or `QDRANT_HOST_PORT` before running `bun run services:up`. |
+| `services:wait` times out while `/health` responds | A service from another workspace is answering on the configured port. | Run `bun run services:down` in that workspace or choose a different `STORY_OS_HOST_PORT`. |
 | PowerShell refuses to run `setup.ps1` | Execution policy blocks local scripts. | Run the bypass command shown in the Windows setup section. |
 | `/novel:status` says MCP is unreachable | Services are stopped or health failed. | Run `bun run services:up`, then open `http://127.0.0.1:7127/health`. |
 | `mcp:smoke` fails immediately | Story OS MCP is not running. | Run `bun run services:up` first. |
