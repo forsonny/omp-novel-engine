@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.7 - 2026-06-23
+
+- Reworked the README into a public-facing setup, architecture, command, configuration, and troubleshooting guide.
+
 ## 0.5.6 - 2026-06-23
 
 - Moved the local OMP start prompt out of the published repository surface.
