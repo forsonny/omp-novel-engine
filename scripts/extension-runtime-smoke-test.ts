@@ -16,6 +16,7 @@ type MockContext = {
   ui: {
     input: (label: string, initialValue?: string) => Promise<string>;
     select?: (label: string, options: string[]) => Promise<string>;
+    confirm?: (title: string, message: string) => Promise<boolean>;
     notify: (message: string, level?: string) => void;
   };
 };
@@ -99,6 +100,7 @@ const pi = {
 const requiredCommands = [
   "novel:status",
   "novel:new",
+  "novel:approve-gate",
   "novel:draft-chapter",
   "novel:revise-chapter",
   "serial:plan-season",
@@ -144,6 +146,7 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
 
 let variantListCalls = 0;
 const routeCalls: string[] = [];
+const requestBodies: Array<{ path: string; body: JsonMap }> = [];
 const selectCalls: Array<{ label: string; options: string[] }> = [];
 const originalFetch = globalThis.fetch;
 const notify = (message: string, level?: string) => {
@@ -163,9 +166,11 @@ const smokeSelect = async (label: string, options: string[]) => {
   return options[0] ?? "";
 };
 
-globalThis.fetch = async (input: RequestInfo | URL) => {
+globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   routeCalls.push(url.pathname);
+  const body = typeof init?.body === "string" ? asRecord(JSON.parse(init.body)) : {};
+  requestBodies.push({ path: url.pathname, body });
 
   if (url.pathname === "/api/project/create") {
     return jsonResponse(mcpOk({
@@ -184,8 +189,41 @@ globalThis.fetch = async (input: RequestInfo | URL) => {
           pendingGates: [],
           workflow: { currentStage: "chapter", allowedNextAction: "draft" },
         },
+        {
+          project: { slug: "runtime-smoke-new", title: "Runtime Smoke Serial", mode: "serial" },
+          pendingGates: [
+            {
+              id: "premise-gate",
+              gate_type: "premise",
+              status: "pending",
+              scope_type: "project",
+              scope_id: "runtime-smoke-new-project",
+            },
+          ],
+          workflow: { currentStage: "premise", allowedNextAction: "submit_gate_decision" },
+        },
       ],
       pendingGates: [],
+    }));
+  }
+
+  if (url.pathname === "/api/gate/pending") {
+    return jsonResponse(mcpOk({
+      gate: {
+        id: "premise-gate",
+        gate_type: "premise",
+        status: "pending",
+        scope_type: "project",
+        scope_id: "runtime-smoke-new-project",
+      },
+    }));
+  }
+
+  if (url.pathname === "/api/gate/decision") {
+    return jsonResponse(mcpOk({
+      gate: { id: "premise-gate", gate_type: "premise", status: "approved" },
+      decision: { id: "decision-one", decision: "approved", human_confirmed: 1 },
+      nextGate: { id: "worldbuilding-gate", gate_type: "worldbuilding", status: "pending" },
     }));
   }
 
@@ -345,6 +383,31 @@ try {
     addCheck("new command reports created project locally", joinedNotifications.includes("Created project"), joinedNotifications);
     addCheck("new command notification is informational", notifications.some((entry) => entry.message.includes("Created project") && entry.level === "info"), JSON.stringify(notifications));
     addCheck("new command maps selected project mode", selectCalls.some((entry) => entry.label === "Project mode"), JSON.stringify(selectCalls));
+  }
+
+  const approveCommand = commands.find((entry) => entry.name === "novel:approve-gate")?.command;
+  if (!approveCommand) {
+    addCheck("approve gate command available for invocation", false);
+  } else {
+    await approveCommand.handler("runtime-smoke-new", {
+      cwd: process.cwd(),
+      hasUI: true,
+      ui: {
+        input: async (_label: string, initialValue?: string) => initialValue ?? "",
+        select: smokeSelect,
+        confirm: async () => true,
+        notify,
+      },
+    });
+
+    const decisionBody = requestBodies.find((entry) => entry.path === "/api/gate/decision")?.body ?? {};
+    const joinedNotifications = notifications.map((entry) => entry.message).join("\n---\n");
+    addCheck("approve gate reads pending gate", routeCalls.includes("/api/gate/pending"), routeCalls.join(", "));
+    addCheck("approve gate records decision", routeCalls.includes("/api/gate/decision"), routeCalls.join(", "));
+    addCheck("approve gate uses OMP confirmation source", decisionBody.decisionSource === "omp_ui_confirmation", JSON.stringify(decisionBody));
+    addCheck("approve gate records human confirmation", decisionBody.humanConfirmed === true, JSON.stringify(decisionBody));
+    addCheck("approve gate includes confirmation nonce", typeof decisionBody.confirmationNonce === "string" && decisionBody.confirmationNonce.length > 0, JSON.stringify(decisionBody));
+    addCheck("approve gate reports next gate locally", joinedNotifications.includes("Next gate: worldbuilding:pending"), joinedNotifications);
   }
 
   const draftCommand = commands.find((entry) => entry.name === "novel:draft-chapter")?.command;

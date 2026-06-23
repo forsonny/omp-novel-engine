@@ -41,7 +41,7 @@ const gateDecisionSecret = process.env.STORY_OS_GATE_DECISION_SECRET?.trim() || 
 
 const MCP_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MCP_SCHEMA_VERSION = "schema.sql@v6";
-const MCP_SERVER_VERSION = "0.5.9";
+const MCP_SERVER_VERSION = "0.5.10";
 const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 const ALLOWED_GATE_DECISION_STATUSES = ["approved", "rejected", "needs_revision", "blocked_by_audit"] as const;
 const BLOCKING_GATE_STATUSES = new Set<string>(["blocked_by_audit"]);

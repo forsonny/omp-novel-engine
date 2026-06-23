@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.10 - 2026-06-23
+
+- Added `/novel:approve-gate` to record pending human gate approvals through an OMP confirmation prompt.
+- Updated `/novel:new` guidance to point at the real approval command instead of referring to an unspecified UI.
+
 ## 0.5.9 - 2026-06-23
 
 - Changed OMP command acknowledgements to local UI notifications so slash commands do not replay corrupted session history through provider turns.

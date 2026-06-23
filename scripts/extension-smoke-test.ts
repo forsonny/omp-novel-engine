@@ -159,8 +159,12 @@ if (existsSync(commandRegistryPath)) {
   const hasStatusCommand = /\bregisterCommand\(\s*["'`]novel:status["'`]/.test(
     registryText,
   );
+  const hasApproveGateCommand = /\bregisterCommand\(\s*["'`]novel:approve-gate["'`]/.test(
+    registryText,
+  );
   addCheck("command registry contains /novel:status", hasStatusCommand);
   addCheck("command registry shows API-backed /novel:new flow", hasNewProjectCreationPath);
+  addCheck("command registry enables /novel:approve-gate", hasApproveGateCommand && registryText.includes("/api/gate/decision"));
   addCheck("command registry enables /novel:draft-chapter", hasDraftChapterCommand && hasChapterWorkflowPaths);
   addCheck("command registry enables /novel:revise-chapter", hasReviseChapterCommand && hasChapterWorkflowPaths);
   addCheck("command registry enables /serial:plan-season", hasSerialSeasonPlanCommand && hasSerialSeasonPlanRoute);

@@ -114,6 +114,7 @@ bun run services:down
 |---|---|
 | `/novel:status` | Check extension, config, MCP, and project state. |
 | `/novel:new` | Create a Story OS project and start the approval-gated workflow. |
+| `/novel:approve-gate [project-slug]` | Approve a pending human gate through an OMP confirmation prompt. |
 | `/novel:draft-chapter` | Continue the chapter workflow without bypassing gates. |
 | `/novel:revise-chapter` | Continue revision work through Story OS state. |
 | `/serial:plan-season` | Create a serial season plan. |

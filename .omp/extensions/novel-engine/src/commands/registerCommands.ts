@@ -1,3 +1,5 @@
+import { createHash, createHmac } from "node:crypto";
+import { resolve } from "node:path";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { storyOsGet, storyOsPost } from "../clients/storyOsClient";
 import {
@@ -28,6 +30,11 @@ type PendingGateSummary = {
   status: string;
   scopeType: string;
   scopeId: string;
+};
+type PendingGateChoice = PendingGateSummary & {
+  projectSlug: string;
+  projectTitle: string;
+  label: string;
 };
 type ChapterWorkflowSummary = {
   chapterStatus: "blocked" | "ready" | "error";
@@ -61,12 +68,38 @@ const asObject = (value: unknown): JsonMap => (
 const asString = (value: unknown): string => (typeof value === "string" ? value : "");
 const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const asNumber = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : Number.NaN);
+const workspaceIdForCwd = (cwd: string): string => {
+  const workspaceRoot = resolve(process.env.STORY_OS_WORKSPACE ?? cwd);
+  const normalized = workspaceRoot.replace(/\\/g, "/").toLowerCase();
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+};
+const storyOsAuthTokenForCwd = (cwd: string): string => (
+  process.env.STORY_OS_AUTH_TOKEN?.trim()
+  || createHash("sha256").update(`story-os-auth:${workspaceIdForCwd(cwd)}`).digest("hex")
+);
+const createGateConfirmationNonce = (
+  cwd: string,
+  projectSlug: string,
+  gateReference: string,
+  gateStatus: string
+): string => (
+  createHmac("sha256", process.env.STORY_OS_GATE_DECISION_SECRET?.trim() || storyOsAuthTokenForCwd(cwd))
+    .update(`${projectSlug}:${gateReference}:${gateStatus}`)
+    .digest("hex")
+);
 const asChoiceText = (value: unknown): string => {
   const direct = asString(value);
   if (direct) return direct;
   const record = asObject(value);
   return asString(record.value) || asString(record.label);
 };
+const normalizeStoryGate = (entry: JsonMap): PendingGateSummary => ({
+  gateId: asString(entry.gateId || entry.id),
+  gateType: asString(entry.gateType || entry.gate_type),
+  status: asString(entry.status),
+  scopeType: asString(entry.scopeType || entry.scope_type),
+  scopeId: asString(entry.scopeId || entry.scope_id)
+});
 const sendCommandMessage = (
   ctx: CommandMessageContext,
   content: string
@@ -136,6 +169,38 @@ const resolveProjectSlug = (projectStatus: unknown): string => {
 
   const project = asObject(firstProject.project);
   return asString(project.slug) || asString(firstProject.slug);
+};
+
+const formatGateChoiceLabel = (projectSlug: string, projectTitle: string, gate: PendingGateSummary): string => (
+  `${projectSlug} - ${gate.gateType || "gate"}:${gate.status || "pending"}${projectTitle ? ` - ${projectTitle}` : ""}`
+);
+
+const collectPendingGateChoices = (projectStatus: unknown): PendingGateChoice[] => {
+  if (!isStoryCallOk(projectStatus)) return [];
+  const payload = unwrapStoryData(projectStatus);
+  return asArray(payload.projects)
+    .map((entry) => asObject(entry))
+    .flatMap((entry) => {
+      const project = asObject(entry.project);
+      const projectSlug = asString(project.slug) || asString(entry.slug);
+      const projectTitle = asString(project.title);
+      if (!projectSlug) return [];
+      return asArray(entry.pendingGates)
+        .map((gateEntry) => normalizeStoryGate(asObject(gateEntry)))
+        .filter((gate) => gate.status === "pending")
+        .map((gate) => ({
+          ...gate,
+          projectSlug,
+          projectTitle,
+          label: formatGateChoiceLabel(projectSlug, projectTitle, gate)
+        }));
+    });
+};
+
+const parseProjectSlugArg = (args: unknown): string => {
+  if (typeof args === "string") return args.trim().split(/\s+/).filter(Boolean)[0] ?? "";
+  const record = asObject(args);
+  return asString(record.projectSlug || record.slug || record.project);
 };
 
 const selectChoice = async <T extends string>(
@@ -573,6 +638,103 @@ export function registerCommands(pi: ExtensionAPI) {
     }
   });
 
+  pi.registerCommand("novel:approve-gate", {
+    description: "Approve the selected pending Story OS human gate through an OMP confirmation prompt.",
+    handler: async (args, ctx) => {
+      const cwd = ctx.cwd ?? process.cwd();
+      const requestedSlug = parseProjectSlugArg(args);
+      let selectedGate: PendingGateChoice | null = null;
+
+      if (requestedSlug) {
+        const pendingResponse = await storyOsPost("/api/gate/pending", { projectSlug: requestedSlug }, { cwd });
+        if (!isStoryCallOk(pendingResponse)) {
+          const errorText = storyErrorText(pendingResponse) || pendingResponse.error || "unknown error";
+          ctx.ui.notify(`Unable to read pending gate for ${requestedSlug}: ${errorText}`, "warning");
+          return;
+        }
+
+        const pendingGate = normalizeStoryGate(asObject(unwrapStoryData(pendingResponse).gate));
+        if (!pendingGate.gateId) {
+          ctx.ui.notify(`No pending gate found for ${requestedSlug}.`, "info");
+          return;
+        }
+        selectedGate = {
+          ...pendingGate,
+          projectSlug: requestedSlug,
+          projectTitle: "",
+          label: formatGateChoiceLabel(requestedSlug, "", pendingGate)
+        };
+      } else {
+        const projectStatus = await storyOsPost("/api/project/status", {}, { cwd });
+        if (!isStoryCallOk(projectStatus)) {
+          const errorText = storyErrorText(projectStatus) || projectStatus.error || "unknown error";
+          ctx.ui.notify(`Unable to read pending gates: ${errorText}`, "warning");
+          return;
+        }
+
+        const gateChoices = collectPendingGateChoices(projectStatus);
+        if (gateChoices.length === 0) {
+          ctx.ui.notify("No pending gates found.", "info");
+          return;
+        }
+
+        const labels = gateChoices.map((choice) => choice.label);
+        const selection = typeof ctx.ui.select === "function"
+          ? await ctx.ui.select("Pending gate to approve", labels)
+          : await ctx.ui.input(`Pending gate to approve (${labels.join(", ")})`, labels[0]);
+        const selectionText = asChoiceText(selection);
+        const selectionIndex = asNumber(selection);
+        selectedGate = gateChoices.find((choice) => choice.label === selectionText)
+          ?? (Number.isInteger(selectionIndex) ? gateChoices[selectionIndex] : undefined)
+          ?? null;
+      }
+
+      if (!selectedGate) {
+        ctx.ui.notify("Gate approval cancelled.", "info");
+        return;
+      }
+
+      const confirmed = await ctx.ui.confirm(
+        "Approve pending gate",
+        `Approve ${selectedGate.gateType || "gate"} for ${selectedGate.projectSlug}?`
+      );
+      if (!confirmed) {
+        ctx.ui.notify("Gate approval cancelled.", "info");
+        return;
+      }
+
+      const decision = "approved";
+      const gateReference = selectedGate.gateId ? `gate:${selectedGate.gateId}` : `type:${selectedGate.gateType}`;
+      const decisionResponse = await storyOsPost("/api/gate/decision", {
+        projectSlug: selectedGate.projectSlug,
+        gateId: selectedGate.gateId,
+        gateType: selectedGate.gateType,
+        scopeType: selectedGate.scopeType || "project",
+        scopeId: selectedGate.scopeId,
+        decision,
+        humanDecision: decision,
+        humanConfirmed: true,
+        decisionSource: "omp_ui_confirmation",
+        decidedBy: "omp-novel-engine",
+        notes: "Approved through /novel:approve-gate.",
+        confirmationNonce: createGateConfirmationNonce(cwd, selectedGate.projectSlug, gateReference, decision)
+      }, { cwd });
+
+      if (!isStoryCallOk(decisionResponse)) {
+        const errorText = storyErrorText(decisionResponse) || decisionResponse.error || "unknown error";
+        ctx.ui.notify(`Unable to approve gate: ${errorText}`, "warning");
+        return;
+      }
+
+      const payload = unwrapStoryData(decisionResponse);
+      const nextGate = normalizeStoryGate(asObject(payload.nextGate));
+      const nextText = nextGate.gateType
+        ? ` Next gate: ${nextGate.gateType}:${nextGate.status || "pending"}.`
+        : " No next gate was created.";
+      ctx.ui.notify(`Approved ${selectedGate.gateType || "gate"} for ${selectedGate.projectSlug}.${nextText}`, "info");
+    }
+  });
+
   pi.registerCommand("novel:new", {
     description: "Create a new novel, finite series, or indefinite serial project through a human approval gate.",
     handler: async (_args, ctx) => {
@@ -612,7 +774,7 @@ export function registerCommands(pi: ExtensionAPI) {
 
       await sendCommandMessage(
         ctx,
-        `Created ${asString(project.slug) ? `project "${asString(project.slug)}"` : "new project"} with premise gate ${asString(gate.id) || "pending"}. Please review premise options and approve in the UI.`,
+        `Created ${asString(project.slug) ? `project "${asString(project.slug)}"` : "new project"} with premise gate ${asString(gate.id) || "pending"}. Next: run /novel:approve-gate ${asString(project.slug)} when you are ready to approve that gate.`,
       );
     }
   });
