@@ -1,0 +1,64 @@
+projectMode: ask # standalone | series | serial | ask
+
+humanInLoop:
+  strict: true
+  requireApprovalAt:
+    - premise
+    - worldbuilding
+    - knowledge_graph
+    - series_bible
+    - plot_event_character_pov
+    - beats
+    - pre_prose_judges
+    - chapter_variant_choice
+    - post_prose_gates
+    - chapter_complete
+  allowAutoDraftAfterSessionStop: false
+
+drafting:
+  chapterVariantCount: 3
+  variants:
+    - id: canon-tight
+      purpose: "Minimize continuity risk and adhere closely to approved beat map."
+    - id: character-heavy
+      purpose: "Prioritize emotional movement, relationships, and interior/exterior character pressure."
+    - id: plot-accelerated
+      purpose: "Prioritize event movement, momentum, cliffhanger force, and serial readability."
+
+sevenPoint:
+  mode: flexible-diagnostic
+  requiredScopes:
+    - serial_promise
+    - season_or_book
+    - subplot
+    - major_character
+    - chapter_or_episode
+  progressionFantasyThresholds: enabled_when_profile_active
+
+storage:
+  sqlitePath: stories/${PROJECT_SLUG}/canon/canon.db
+  graphDir: stories/${PROJECT_SLUG}/canon/graph
+  markdownDir: stories/${PROJECT_SLUG}
+  qdrant:
+    url: http://127.0.0.1:6333
+    collections:
+      craftDocs: novel_craft_docs
+      canonFacts: novel_canon_facts
+      chapterMemory: novel_chapter_memory
+      projectNotes: novel_project_notes
+
+models:
+  architect: configurable
+  worldbuilder: configurable
+  kgCurator: configurable
+  outliner: configurable
+  beatPlanner: configurable
+  drafter: configurable
+  reviser: configurable
+  judge: configurable
+  summarizer: configurable
+  embedder: configurable
+
+mcp:
+  serverName: novel-story-os
+  baseUrl: http://127.0.0.1:7127

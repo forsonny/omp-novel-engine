@@ -1,0 +1,39 @@
+{
+  "name": "omp-novel-engine",
+  "version": "0.5.2",
+  "private": true,
+  "description": "OMP extension workspace for planning, drafting, auditing, and exporting novels, series, and serials.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "packageManager": "bun@1.3.14",
+  "engines": {
+    "bun": ">=1.3.14"
+  },
+  "scripts": {
+    "doctor": "bun run scripts/check-setup.ts",
+    "setup": "bun run scripts/check-setup.ts",
+    "services:up": "docker compose -f docker/compose.yml up -d --build && bun run scripts/wait-for-services.ts",
+    "services:wait": "bun run scripts/wait-for-services.ts",
+    "services:down": "docker compose -f docker/compose.yml down",
+    "backup": "bun run scripts/backup-project.ts backup",
+    "backup:demo": "bun run scripts/backup-project.ts backup --project demo",
+    "restore": "bun run scripts/backup-project.ts restore",
+    "backup:list": "bun run scripts/backup-project.ts list",
+    "quality-scan": "bun run scripts/quality-scan.ts",
+    "quality-scan:strict": "bun run scripts/quality-scan.ts --fail-on-findings",
+    "reset-demo": "bun run scripts/reset-demo-project.ts --project demo --yes",
+    "extension:smoke": "bun run scripts/extension-smoke-test.ts",
+    "extension:runtime-smoke": "bun run scripts/extension-runtime-smoke-test.ts",
+    "mcp:config-smoke": "bun run scripts/mcp-smoke-test.ts",
+    "mcp:protocol-smoke": "bun run scripts/mcp-protocol-smoke-test.ts",
+    "mcp:smoke": "bun run mcp:config-smoke && bun run mcp:protocol-smoke",
+    "phase3:smoke": "bun run scripts/phase3-planning-smoke-test.ts",
+    "phase4:smoke": "bun run scripts/phase4-chapter-workflow-smoke-test.ts",
+    "phase5:smoke": "bun run scripts/phase5-serial-smoke-test.ts",
+    "phase6:smoke": "bun run scripts/phase6-hardening-smoke-test.ts",
+    "smoke:offline": "bun run extension:smoke && bun run extension:runtime-smoke && bun run mcp:config-smoke",
+    "smoke:server": "bun run mcp:protocol-smoke && bun run phase3:smoke && bun run phase4:smoke && bun run phase5:smoke && bun run phase6:smoke"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,9 @@
+extensions:
+  - ./.omp/extensions/novel-engine
+
+skills:
+  enabled: true
+  enableSkillCommands: true
+
+tools:
+  discoveryMode: auto
