@@ -8,3 +8,4 @@
 - Added GitHub Actions smoke workflow, editor metadata, Git attributes, security policy, contribution guide, and license placeholder.
 - Hardened repository hygiene for generated stories, logs, backups, archives, local agent state, Docker runtime data, and private reference uploads.
 - Replaced archive/build-kit documentation with clone-based setup, first-run OMP workflow, troubleshooting, command behavior, verification, and publishing guidance.
+- Recorded the public GitHub repository URL in package metadata.

@@ -61,7 +61,7 @@ Install links:
 With Git:
 
 ```sh
-git clone <your-github-repo-url> omp-novel-engine
+git clone https://github.com/forsonny/omp-novel-engine.git omp-novel-engine
 cd omp-novel-engine
 ```
 
@@ -233,13 +233,12 @@ Do not commit:
 
 ## Publishing checklist
 
-Before making the GitHub repository public:
+Before inviting other users:
 
 1. Replace `LICENSE` with the intended license terms.
-2. Update `package.json` repository, bugs, and homepage fields after the GitHub URL exists.
-3. Confirm no private story data, local logs, backups, archives, or copied reference files are staged.
-4. Run `bun run smoke:offline`.
-5. Run `bun run services:up`, `bun run smoke:server`, and `bun run services:down`.
+2. Confirm no private story data, local logs, backups, archives, or copied reference files are staged.
+3. Run `bun run smoke:offline`.
+4. Run `bun run services:up`, `bun run smoke:server`, and `bun run services:down`.
 
 ## License
 
